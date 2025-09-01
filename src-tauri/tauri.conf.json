@@ -1,0 +1,46 @@
+{
+  "package": {
+    "productName": "QuietLibrary",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "clipboard": { "all": true },
+      "path": { "all": true },
+      "shell": { "all": false, "open": true },
+      "dialog": { "all": false, "open": true },
+      "window": { "all": true },
+      "fs": {
+        "all": false,
+        "readFile": true,
+        "scope": ["**"]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "targets": ["msi", "dmg", "appimage"],
+      "identifier": "com.quietlibrary.app",
+      "icon": [],
+      "resources": [
+        "resources/**"
+      ]
+    },
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
+    },
+    "windows": [
+      {
+        "title": "QuietLibrary",
+        "width": 1100,
+        "height": 750
+      }
+    ]
+  },
+  "build": {
+    "beforeDevCommand": "npm run ensure-dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:5500",
+    "distDir": "../dist"
+  }
+}
