@@ -59,6 +59,8 @@ export default function App() {
       setView('epub')
     } else if (ext === 'txt' || ext === 'md' || ext === 'markdown' || ext === 'html' || ext === 'htm') {
       setView('text')
+    } else {
+      alert(`Unsupported file type: ${ext}`)
     }
   }
 

@@ -33,19 +33,12 @@ fn main() {
             commands::library::list_watched_folders,
             commands::library::remove_watched_folder,
             commands::indexer::reindex_all,
-            commands::indexer::index_incremental,
             commands::indexer::clear_extract_cache,
             commands::search::search,
-            commands::open::resolve_open_target,
             commands::bookmarks::add_bookmark,
             commands::bookmarks::list_bookmarks,
             commands::bookmarks::remove_bookmark,
             commands::open::reveal_in_os,
-            commands::open::pdf_page_count,
-            commands::open::render_pdf_page,
-            commands::open::pdf_find_matches,
-            commands::open::warm_render_cache,
-            commands::open::pdf_next_prev_page_with_match,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

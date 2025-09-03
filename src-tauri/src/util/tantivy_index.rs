@@ -61,7 +61,7 @@ pub fn rebuild_index(state: &AppState) -> Result<(), String> {
     let cache_root = state.app_dir.join("cache");
     let docs: Vec<(String, String, Option<u32>, Option<String>, String)> = all_files
         .par_iter()
-        .map(|path| {
+        .flat_map_iter(|path| {
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
             if is_supported_text(path) {
                 if let Ok((title, text)) = extract_title_and_text(path) {
@@ -77,7 +77,6 @@ pub fn rebuild_index(state: &AppState) -> Result<(), String> {
             }
             Vec::new()
         })
-        .flatten()
         .collect();
 
     // Add to index serially

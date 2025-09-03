@@ -1,5 +1,5 @@
 import React from 'react'
-import { addBookmark, copyCitation, revealInOS } from '@/lib/ipc'
+import { addBookmark } from '@/lib/ipc'
 import { buttonStyle } from '@/styles'
 
 export default function ActionsBar({
@@ -27,10 +27,7 @@ export default function ActionsBar({
         {currentView === 'pdf' || currentView === 'epub' ? (
           <button onClick={handleAddBookmark} style={buttonStyle}>Add bookmark</button>
         ) : null}
-        <button disabled={!selection} onClick={() => selection && copyCitation(selection)} style={buttonStyle}>Copy citation</button>
-        <button disabled={!selection} onClick={() => selection && revealInOS(selection.path)} style={buttonStyle}>Reveal in OS</button>
       </div>
     </div>
   )
 }
-

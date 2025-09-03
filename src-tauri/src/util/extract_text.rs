@@ -1,58 +1,27 @@
 use std::{fs, io::Read, path::Path};
+use pulldown_cmark::{Event, Options, Parser};
 
 fn read_prefix(path: &Path, max_bytes: usize) -> Result<String, String> {
     let mut f = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut buf = Vec::with_capacity(max_bytes);
     let _ = (&mut f).take(max_bytes as u64).read_to_end(&mut buf);
-    // Try UTF-8; fall back to lossily decoding
-    Ok(String::from_utf8(buf).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+    // Try UTF-8; fall back to lossily decoding using the original bytes
+    let text = String::from_utf8(buf).unwrap_or_else(|e| {
+        let bytes = e.into_bytes();
+        String::from_utf8_lossy(&bytes).into_owned()
+    });
+    Ok(text)
 }
 
-pub fn html_to_text(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut in_tag = false;
-    for ch in input.chars() {
-        match ch {
-            '<' => { in_tag = true; }
-            '>' => { in_tag = false; out.push(' '); }
-            _ => {
-                if !in_tag { out.push(ch); }
-            }
+fn markdown_to_text(input: &str) -> String {
+    let mut text_content = String::new();
+    let parser = Parser::new_ext(input, Options::empty());
+    for event in parser {
+        if let Event::Text(text) = event {
+            text_content.push_str(&text);
         }
     }
-    normalize_ws(&out)
-}
-
-fn strip_markdown(input: &str) -> String {
-    // Minimal: remove leading '#' from headings, inline formatting (* _ `), link targets keep text
-    let mut out = String::with_capacity(input.len());
-    let mut in_code = false;
-    let mut i = 0;
-    let bytes = input.as_bytes();
-    while i < bytes.len() {
-        let c = bytes[i] as char;
-        if c == '`' { in_code = !in_code; i += 1; continue; }
-        if in_code { out.push(c); i += 1; continue; }
-        if c == '[' {
-            // Copy link text [text](url) -> text
-            i += 1;
-            while i < bytes.len() && bytes[i] as char != ']' { out.push(bytes[i] as char); i += 1; }
-            // skip ]( ... )
-            while i < bytes.len() && bytes[i] as char != ')' { i += 1; }
-            if i < bytes.len() { i += 1; }
-            continue;
-        }
-        if c == '#' {
-            // skip leading hashes in a heading
-            while i < bytes.len() && (bytes[i] as char == '#' || bytes[i] as char == ' ') { i += 1; }
-            out.push('\n');
-            continue;
-        }
-        if c == '*' || c == '_' { i += 1; continue; }
-        out.push(c);
-        i += 1;
-    }
-    normalize_ws(&out)
+    text_content
 }
 
 fn normalize_ws(s: &str) -> String {
@@ -76,7 +45,7 @@ pub fn extract_title_and_text(path: &Path) -> Result<(String, String), String> {
     let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
     if ext == "html" || ext == "htm" {
-        let text = html_to_text(&raw);
+        let text = html2text::from_read(raw.as_bytes(), 80);
         // naive <title> extraction
         let title = raw
             .to_lowercase()
@@ -86,7 +55,7 @@ pub fn extract_title_and_text(path: &Path) -> Result<(String, String), String> {
             .unwrap_or_else(|| name.clone());
         Ok((title, text))
     } else if ext == "md" || ext == "markdown" {
-        let text = strip_markdown(&raw);
+        let text = markdown_to_text(&raw);
         let title = raw
             .lines()
             .map(|l| l.trim())

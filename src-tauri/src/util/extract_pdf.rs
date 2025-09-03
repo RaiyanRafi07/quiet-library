@@ -6,8 +6,7 @@ use std::{
 
 use lopdf::{content::Content, Document, Object, ObjectId};
 use serde::{Deserialize, Serialize};
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use crate::util::pdfium_loader;
 
 // Prefer pdfium-render for accurate Unicode extraction; fall back to lopdf if binding fails
 // or extraction encounters an error.
@@ -18,24 +17,8 @@ pub fn extract_pdf_pages(path: &Path) -> Result<(String, Vec<(u32, String)>, Str
     }
 }
 
-static PDFIUM_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
 fn extract_with_pdfium(path: &Path) -> Result<(String, Vec<(u32, String)>), String> {
-    use pdfium_render::prelude::*;
-    let _guard = PDFIUM_GUARD.lock().unwrap();
-    // Try to bind to a PDFium DLL placed next to the exe or provided via PDFIUM_PATH;
-    // fall back to a system-installed library.
-    let mut maybe = None;
-    for lib_path in candidate_pdfium_paths() {
-        if lib_path.exists() {
-            if let Ok(bind) = Pdfium::bind_to_library(&lib_path) { maybe = Some(bind); break; }
-        }
-    }
-    let bindings = match maybe {
-        Some(b) => b,
-        None => Pdfium::bind_to_system_library().map_err(|e| format!("pdfium bind failed: {}", e))?,
-    };
-    let pdfium = Pdfium::new(bindings);
+    let pdfium = pdfium_loader::bind_pdfium()?;
 
     let doc = pdfium
         .load_pdf_from_file(path, None)
@@ -55,7 +38,7 @@ fn extract_with_pdfium(path: &Path) -> Result<(String, Vec<(u32, String)>), Stri
         if let Ok(page) = pages.get(i as u16) {
             let text = page
                 .text()
-                .and_then(|t| Ok(t.all()))
+                .map(|t| t.all())
                 .unwrap_or_default();
             let norm = normalize_ws_preserve_newlines(&sanitize_text(&text));
             if !norm.is_empty() {
@@ -65,42 +48,6 @@ fn extract_with_pdfium(path: &Path) -> Result<(String, Vec<(u32, String)>), Stri
     }
     Ok((title, out))
 }
-
-#[cfg(target_os = "windows")]
-fn candidate_pdfium_paths() -> Vec<std::path::PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(p) = std::env::var("PDFIUM_PATH") { candidates.push(std::path::PathBuf::from(p)); }
-    if let Ok(exe) = std::env::current_exe() { if let Some(dir) = exe.parent() { 
-        candidates.push(dir.join("pdfium.dll"));
-        // Also check parent of the exe dir (e.g., target/ vs target/debug/)
-        if let Some(parent) = dir.parent() { candidates.push(parent.join("pdfium.dll")); }
-        candidates.push(dir.join("pdfium").join("pdfium.dll"));
-        candidates.push(dir.join("resources").join("pdfium.dll"));
-        candidates.push(dir.join("resources").join("pdfium").join("pdfium.dll"));
-        // Walk upwards a couple of levels to reach project root and check src-tauri/resources
-        if let Some(parent) = dir.parent() {
-            candidates.push(parent.join("src-tauri").join("resources").join("pdfium.dll"));
-            candidates.push(parent.join("src-tauri").join("resources").join("pdfium").join("pdfium.dll"));
-            if let Some(parent2) = parent.parent() {
-                candidates.push(parent2.join("src-tauri").join("resources").join("pdfium.dll"));
-                candidates.push(parent2.join("src-tauri").join("resources").join("pdfium").join("pdfium.dll"));
-            }
-        }
-    } }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("pdfium.dll"));
-        candidates.push(cwd.join("resources").join("pdfium.dll"));
-        candidates.push(cwd.join("resources").join("pdfium").join("pdfium.dll"));
-        candidates.push(cwd.join("src-tauri").join("resources").join("pdfium.dll"));
-        candidates.push(cwd.join("src-tauri").join("resources").join("pdfium").join("pdfium.dll"));
-    }
-    // Also check a conventional subfolder
-    if let Ok(exe) = std::env::current_exe() { if let Some(dir) = exe.parent() { candidates.push(dir.join("pdfium").join("pdfium.dll")); } }
-    candidates
-}
-
-#[cfg(not(target_os = "windows"))]
-fn candidate_pdfium_paths() -> Vec<std::path::PathBuf> { Vec::new() }
 
 // Previous lopdf-based best-effort extraction retained as fallback
 fn extract_with_lopdf(path: &Path) -> Result<(String, Vec<(u32, String)>), String> {
@@ -231,24 +178,9 @@ fn extract_page_text(doc: &Document, page_id: ObjectId) -> String {
     normalize_ws_preserve_newlines(&sanitize_text(&out))
 }
 
-fn bytes_to_text(bytes: &Vec<u8>) -> String {
+fn bytes_to_text(bytes: &[u8]) -> String {
     // Try UTF-8; fall back to PDFDocEncoding-ish by lossy conversion
-    String::from_utf8(bytes.clone()).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
-}
-
-fn normalize_ws(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut last_space = false;
-    for ch in s.chars() {
-        let is_space = ch.is_whitespace();
-        if is_space {
-            if !last_space { out.push(' '); }
-        } else {
-            out.push(ch);
-        }
-        last_space = is_space;
-    }
-    out.trim().to_string()
+    String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
 }
 
 // Remove control/formatting/invisible characters that often appear in PDF text extraction
@@ -269,43 +201,25 @@ fn sanitize_text(s: &str) -> String {
 }
 
 // Like normalize_ws(), but preserves newlines so the UI can show multi-line context.
+// This function cleans up whitespace within text extracted from a PDF while preserving
+// paragraph breaks, which are essential for good snippet generation.
 fn normalize_ws_preserve_newlines(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut last_space = false;
-    let mut last_newline = false;
-    for ch in s.chars() {
-        match ch {
-            '\r' => { /* drop CR; handle via LF */ }
-            '\n' => {
-                if !last_newline { out.push('\n'); }
-                last_newline = true;
-                last_space = false;
+    let mut result = String::with_capacity(s.len());
+    // Process the text paragraph by paragraph.
+    for paragraph in s.split("\n\n") {
+        // For each paragraph, join its lines into a single line with normalized spaces.
+        let cleaned_paragraph = paragraph
+            .lines()
+            .map(|line| line.trim())
+            .collect::<Vec<&str>>()
+            .join(" ");
+
+        if !cleaned_paragraph.trim().is_empty() {
+            if !result.is_empty() {
+                result.push_str("\n\n"); // Use double newlines to separate paragraphs.
             }
-            _ if ch.is_whitespace() => {
-                if !last_space { out.push(' '); }
-                last_space = true;
-                last_newline = false;
-            }
-            _ => {
-                out.push(ch);
-                last_space = false;
-                last_newline = false;
-            }
+            result.push_str(cleaned_paragraph.trim());
         }
     }
-    // Trim spaces on each line and collapse multiple blank lines
-    let mut cleaned = String::with_capacity(out.len());
-    let mut prev_blank = false;
-    for line in out.lines() {
-        let t = line.trim();
-        if t.is_empty() {
-            if !prev_blank { cleaned.push('\n'); }
-            prev_blank = true;
-        } else {
-            if !cleaned.is_empty() { cleaned.push('\n'); }
-            cleaned.push_str(t);
-            prev_blank = false;
-        }
-    }
-    if cleaned.is_empty() { out.trim().to_string() } else { cleaned }
+    result
 }

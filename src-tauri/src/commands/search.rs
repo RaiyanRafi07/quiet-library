@@ -64,7 +64,7 @@ fn scan_folder(dir: &Path, q: &str, limit: u32, out: &mut Vec<SearchResult>) -> 
                         push_page_results(&path, q, &title, *page, &text, Some(&which), out);
                         if out.len() as u32 >= limit { return Ok(()); }
                     }
-                    println!("quietlibrary: extractor={} file={} ({} pages)", which, path.to_string_lossy(), pages.len());
+                    eprintln!("quietlibrary: extractor={} file={} ({} pages)", which, path.to_string_lossy(), pages.len());
                 }
                 Err(_) => {
                     // fallback to filename match

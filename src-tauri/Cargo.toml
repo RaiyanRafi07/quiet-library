@@ -21,15 +21,12 @@ lopdf = "0.32"
 tantivy = { version = "0.25", default-features = false, features = ["mmap", "lz4-compression"] }
 rayon = "1.10"
 
-# Bundle PDFium with the app so no system dependency is required.
+# Bundle PDFium for text extraction during indexing only.
 pdfium-render = { version = "0.8.35" }
-png = "0.17"
-base64 = "0.22"
 once_cell = "1.19"
-lru = "0.12"
 ## EPUB/PDF content extraction deferred for now
-# pulldown-cmark = "0.10"
-# html2text = "0.6"
+pulldown-cmark = "0.10"
+html2text = "0.6"
 
 [features]
 default = ["custom-protocol"]

@@ -23,4 +23,5 @@ target/
 tmp_pdfium/
 *.tmp
 *.temp
-
+tmp_open.rs
+*.tar.gz
