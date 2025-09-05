@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import Card from '@/ui/Card'
 import { readTextFile } from '@tauri-apps/api/fs'
 
 type Props = { target: { path: string }; query: string }
@@ -32,9 +33,10 @@ export default function ReaderText({ target, query }: Props) {
   }, [html])
 
   return (
-    <div style={{ padding: 16, overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>
-      <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />
+    <div style={{ padding: 16, overflow: 'auto' }}>
+      <Card style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)' }}>
+        <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />
+      </Card>
     </div>
   )
 }
-

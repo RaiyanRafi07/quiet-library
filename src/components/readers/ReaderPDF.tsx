@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { readBinaryFile } from '@tauri-apps/api/fs'
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist/build/pdf'
 import * as pdfjs from 'pdfjs-dist/build/pdf'
+import Toolbar from '@/ui/Toolbar'
+import Button from '@/ui/Button'
 // Vite will turn this import into a served asset URL string
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -23,6 +25,8 @@ export default function ReaderPDF({ target, query }: Props) {
   const [zoom, setZoom] = useState<number>(1)
   const renderTaskRef = useRef<any>(null)
   const searchTokenRef = useRef(0)
+  const textItemsCacheRef = useRef<Map<number, any>>(new Map())
+  const combinedTextCacheRef = useRef<Map<number, string>>(new Map())
 
   useEffect(() => { setPage(target.page || 1) }, [target.path, target.page])
 
@@ -32,10 +36,12 @@ export default function ReaderPDF({ target, query }: Props) {
     setDoc(null)
     setCount(0)
     setError(null)
+    textItemsCacheRef.current.clear()
+    combinedTextCacheRef.current.clear()
     ;(async () => {
       try {
         const bytes = await readBinaryFile(target.path)
-        const task = getDocument({ data: new Uint8Array(bytes) })
+        const task = getDocument({ data: bytes })
         const pdf = await task.promise
         if (cancelled) return
         setDoc(pdf)
@@ -88,7 +94,11 @@ export default function ReaderPDF({ target, query }: Props) {
           const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
           const re = new RegExp(esc, 'gi')
           // Use fine-grained items for better positioning
-          const text = await pdfPage.getTextContent({ disableCombineTextItems: true })
+          let text = textItemsCacheRef.current.get(p)
+          if (!text) {
+            text = await pdfPage.getTextContent({ disableCombineTextItems: true })
+            textItemsCacheRef.current.set(p, text)
+          }
           let firstTop: number | null = null
           for (const item of text.items as any[]) {
             const str: string = item.str || ''
@@ -114,8 +124,8 @@ export default function ReaderPDF({ target, query }: Props) {
               div.style.top = `${top / dpr}px`
               div.style.width = `${width / dpr}px`
               div.style.height = `${fontHeight / dpr}px`
-              div.style.background = 'rgba(255, 230, 0, 0.35)'
-              div.style.outline = '2px solid rgba(255,200,0,0.9)'
+              div.style.background = 'var(--nb-highlight)'
+              div.style.outline = '2px solid var(--nb-highlight-stroke)'
               div.style.pointerEvents = 'none'
               overlay.appendChild(div)
               if (firstTop == null) firstTop = top / dpr
@@ -147,8 +157,9 @@ export default function ReaderPDF({ target, query }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button
+      <Toolbar style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <Button
           onClick={async () => {
             const q = (query || '').trim()
             if (!doc) return
@@ -159,16 +170,20 @@ export default function ReaderPDF({ target, query }: Props) {
             for (let p = Math.max(1, page - 1); p >= 1; p--) {
               // stop early if a newer search started
               if (token !== searchTokenRef.current) return
-              const pdfPage = await doc.getPage(p)
-            const text = await pdfPage.getTextContent({ disableCombineTextItems: true })
-            const combined = (text.items as any[]).map(i => i.str || '').join(' ')
+              let combined = combinedTextCacheRef.current.get(p)
+              if (!combined) {
+                const pdfPage = await doc.getPage(p)
+                const text = await pdfPage.getTextContent({ disableCombineTextItems: true })
+                combined = (text.items as any[]).map(i => i.str || '').join(' ')
+                combinedTextCacheRef.current.set(p, combined)
+              }
               if (re.test(combined)) { setPage(p); return }
             }
           }}
           disabled={page <= 1}
-        >Prev {query.trim() ? 'result' : 'page'}</button>
-        <div style={{ fontSize: 12 }}>Page {page} / {count || '?'}</div>
-        <button
+        >Prev {query.trim() ? 'result' : 'page'}</Button>
+          <div className="nb-meta" style={{ fontSize: 'var(--fs-xs)', fontWeight: 800 }}>Page {page} / {count || '?'}</div>
+          <Button
           onClick={async () => {
             const q = (query || '').trim()
             if (!doc) return
@@ -178,22 +193,41 @@ export default function ReaderPDF({ target, query }: Props) {
             const re = new RegExp(esc, 'i')
             for (let p = Math.min((count || page), page + 1); p <= (count || page); p++) {
               if (token !== searchTokenRef.current) return
-              const pdfPage = await doc.getPage(p)
-              const text = await pdfPage.getTextContent()
-              const combined = (text.items as any[]).map(i => i.str || '').join(' ')
+              let combined = combinedTextCacheRef.current.get(p)
+              if (!combined) {
+                const pdfPage = await doc.getPage(p)
+                const text = await pdfPage.getTextContent({ disableCombineTextItems: true })
+                combined = (text.items as any[]).map(i => i.str || '').join(' ')
+                combinedTextCacheRef.current.set(p, combined)
+              }
               if (re.test(combined)) { setPage(p); return }
             }
           }}
           disabled={!count || page >= count}
-        >Next {query.trim() ? 'result' : 'page'}</button>
-        <div style={{ marginLeft: 8, display: 'flex', gap: 6 }}>
-          <button onClick={() => setZoom(z => Math.max(0.25, z * 0.9))}>-</button>
-          <span style={{ fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
-          <button onClick={() => setZoom(z => Math.min(6, z * 1.1))}>+</button>
-          <button onClick={() => setZoom(1)}>Reset</button>
+        >Next {query.trim() ? 'result' : 'page'}</Button>
         </div>
-        <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>{loading ? 'Rendering…' : ''}</div>
-      </div>
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
+          <Button onClick={() => setZoom(z => Math.max(0.25, z * 0.9))}>-</Button>
+          <span
+            className="nb-meta"
+            style={{
+              fontSize: 'var(--fs-xs)',
+              fontWeight: 800,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 56,
+              textAlign: 'center'
+            }}
+          >{Math.round(zoom * 100)}%</span>
+          <Button onClick={() => setZoom(z => Math.min(6, z * 1.1))}>+</Button>
+          <div className="nb-meta" style={{ fontSize: 'var(--fs-xs)', opacity: 0.7 }}>{loading ? 'Rendering…' : ''}</div>
+          <Button onClick={() => setZoom(1)}>Reset</Button>
+        </div>
+      </Toolbar>
       {error && (
         <div style={{ padding: 8, color: '#b00020', fontSize: 12, borderTop: '1px solid #eee', borderBottom: '1px solid #eee' }}>
           Error: {error}

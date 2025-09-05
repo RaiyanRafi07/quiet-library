@@ -10,6 +10,5 @@ export default function ReaderEPUB({ target, query }: Props) {
       ref.current.textContent = `EPUB viewer placeholder for ${target.path} @ section ${target.section ?? '-'} | query: ${query}`
     }
   }, [target, query])
-  return <div ref={ref} style={{ padding: 16, fontFamily: 'monospace' }} />
+  return <div ref={ref} style={{ padding: 'var(--sp-5)', fontFamily: 'var(--font-body)', fontSize: 'var(--fs-sm)' }} />
 }
-

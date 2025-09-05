@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: asset: tauri:; style-src 'self' 'unsafe-inline';" />
     <title>QuietLibrary</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Minimal fallback styles so background is correct before CSS loads -->
+    <style>
+      html,body,#root{height:100%}
+      body{margin:0;background:#2D293B;color:#E8EDF2}
+    </style>
   </head>
   <body>
     <div id="root"></div>

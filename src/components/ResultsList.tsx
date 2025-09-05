@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
 import type { SearchResult } from '@/lib/ipc'
+import Card from '@/ui/Card'
+import { subtleLink } from '@/styles'
 
 export default function ResultsList({ results, onOpen }: { results: SearchResult[]; onOpen: (r: SearchResult) => void }) {
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -9,31 +11,35 @@ export default function ResultsList({ results, onOpen }: { results: SearchResult
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
       {results.map((r, i) => (
-        <div key={i} style={{ padding: 10, borderRadius: 8, border: '1px solid #ddd', background: 'white' }}>
+        <Card key={i}>
           <button onClick={() => onOpen(r)} style={{ textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-            <div style={{ fontWeight: 600 }}>{r.title || r.path.split(/[\\/]/).pop()}</div>
+            <div className="nb-heading nb-h2" style={{ fontSize: 'var(--fs-lg)' }}>{r.title || r.path.split(/[\\/]/).pop()}</div>
           </button>
-          <div style={{ fontSize: 12, color: '#444', marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.4, maxHeight: expanded === i ? 'none' : 100, overflow: 'hidden' }}>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--nb-card-text)', marginTop: 'var(--sp-2)', whiteSpace: 'pre-wrap', lineHeight: 'var(--lh-normal)', maxHeight: expanded === i ? 'none' : 120, overflow: 'hidden' }}>
             {r.snippet || '-'}
           </div>
           {r.section && (
-            <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>
+            <div className="nb-meta" style={{ fontSize: 'var(--fs-xs)', color: 'var(--nb-muted)', marginTop: 'var(--sp-1)' }}>
               [{r.section}]
             </div>
           )}
-          <div style={{ fontSize: 11, color: '#777', marginTop: 4 }}>
+          <div className="nb-meta" style={{ fontSize: 'var(--fs-xs)', color: 'var(--nb-muted)', marginTop: 'var(--sp-2)' }}>
             {r.page ? `p.${r.page}` : r.section ? r.section : ''} • {r.path}
           </div>
           {r.snippet && r.snippet.length > 220 && (
-            <button onClick={() => toggleExpanded(i)} style={{ fontSize: 11, color: 'blue', background: 'none', border: 'none', padding: 0, cursor: 'pointer', marginTop: 4 }}>
+            <button onClick={() => toggleExpanded(i)} style={{ ...subtleLink, fontSize: 'var(--fs-xs)', marginTop: 'var(--sp-2)' }}>
               {expanded === i ? 'Show less' : 'Show more'}
             </button>
           )}
-        </div>
+        </Card>
       ))}
-      {!results.length && <div style={{ color: '#777' }}>No results</div>}
+      {!results.length && (
+        <Card style={{ color: 'var(--nb-muted)' }}>
+          <div className="nb-heading nb-h2">No results</div>
+        </Card>
+      )}
     </div>
   )
 }

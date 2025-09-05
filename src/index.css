@@ -1,5 +1,118 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;800&family=Archivo+Black&display=swap');
+
+:root {
+  /* Palette mapping (from the reference image)
+     Jasper Orange: #E48F50  | Primary accent
+     Garnet:        #753130  | Secondary accent / emphasis
+     Gunmetal:      #2D293B  | App background / borders
+     Rackley:       #60859E  | Secondary surfaces / states
+     Weldon Blue:   #729BAE  | Primary surfaces (cards, inputs, toolbars)
+  */
+  --nb-bg: #2D293B;            /* Gunmetal background */
+  --nb-surface: #729BAE;       /* Weldon Blue surfaces */
+  --nb-border: #2D293B;        /* Gunmetal hard lines */
+  --nb-accent: #E48F50;        /* Jasper Orange */
+  --nb-accent-2: #753130;      /* Garnet */
+  --nb-muted: #D6E3EA;         /* Muted text on surfaces (brighter for readability) */
+
+  /* Text colors for dark page vs. lightish cards */
+  --nb-body-text: #E8EDF2;     /* Light text on Gunmetal background */
+  --nb-card-text: #182633;     /* Deep slate on blue surfaces (softer than black) */
+  --nb-heading-text: #0F1D2A;  /* Slightly deeper for titles */
+
+  /* Highlights for search selections */
+  --nb-highlight: rgba(228, 143, 80, 0.35);
+  --nb-highlight-stroke: rgba(228, 143, 80, 0.9);
+
+  --nb-shadow: 6px 6px 0 var(--nb-border); /* no blur shadow */
+
+  /* Type scale */
+  --fs-xs: 12px;
+  --fs-sm: 14px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 20px;
+  --lh-tight: 1.2;
+  --lh-normal: 1.5;
+
+  /* Spacing + radii */
+  --sp-1: 6px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 14px;
+  --sp-5: 16px;
+  --sp-6: 24px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --pad-button-y: 10px;
+  --pad-button-x: 14px;
+}
+
+html, body, #root {
+  height: 100%;
+}
 
 body {
-  font-family: 'Noto Sans', sans-serif;
+  margin: 0;
+  background: var(--nb-bg);
+  color: var(--nb-body-text);
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
 }
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+h1, h2, h3, .nb-heading {
+  font-family: var(--font-heading);
+  letter-spacing: 0.5px;
+  line-height: var(--lh-tight);
+  color: var(--nb-heading-text);
+}
+
+.nb-h1 { font-size: var(--fs-xl); }
+.nb-h2 { font-size: var(--fs-lg); }
+.nb-meta { font-size: var(--fs-xs); opacity: 0.9; }
+
+button {
+  font-family: inherit;
+}
+
+input::placeholder {
+  color: var(--nb-muted);
+  font-weight: 600;
+}
+
+input, .nb-heading, .nb-meta, .nb-body {
+  font-family: var(--font-body);
+}
+
+/* Unify <mark> highlighting with palette accent */
+mark {
+  background: var(--nb-highlight);
+  color: inherit;
+  padding: 0 2px;
+}
+
+/* Button state styles for consistency */
+.nb-button {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+}
+.nb-button:hover {
+  filter: brightness(0.97);
+}
+.nb-button:active {
+  transform: translateY(1px);
+  box-shadow: 4px 4px 0 var(--nb-border);
+}
+.nb-button:focus-visible {
+  outline: 3px solid var(--nb-accent-2);
+  outline-offset: 2px;
+}
+  /* Font tokens */
+  --font-body: 'Public Sans', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  --font-heading: 'Archivo Black', Impact, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

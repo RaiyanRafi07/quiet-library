@@ -115,10 +115,33 @@ pub fn search_index(state: &AppState, q: &str, limit: usize) -> Result<Vec<Searc
     let dir = index_dir(state);
     if !dir.exists() { return Ok(vec![]); }
     let (_, fields) = schema();
-    let index = Index::open_in_dir(&dir).map_err(|e| e.to_string())?;
-    let reader = index.reader().map_err(|e| e.to_string())?;
+    // Lazily open and cache index + reader in AppState for faster subsequent queries
+    {
+        let mut idx_lock = state.index.lock().map_err(|_| "index lock".to_string())?;
+        if idx_lock.is_none() {
+            let index = Index::open_in_dir(&dir).map_err(|e| e.to_string())?;
+            *idx_lock = Some(index);
+        }
+    }
+    {
+        let mut reader_lock = state.reader.lock().map_err(|_| "reader lock".to_string())?;
+        if reader_lock.is_none() {
+            let idx_lock = state.index.lock().map_err(|_| "index lock".to_string())?;
+            let index = idx_lock.as_ref().ok_or_else(|| "index not available".to_string())?;
+            let reader = index.reader().map_err(|e| e.to_string())?;
+            *reader_lock = Some(reader);
+        }
+    }
+    let reader = {
+        let r = state.reader.lock().map_err(|_| "reader lock".to_string())?;
+        r.as_ref().unwrap().clone()
+    };
+    // Pick up any new segments if index was rebuilt
+    let _ = reader.reload();
     let searcher = reader.searcher();
-    let qp = tantivy::query::QueryParser::for_index(&index, vec![fields.title, fields.body]);
+    let idx_guard = state.index.lock().map_err(|_| "index lock".to_string())?;
+    let index_ref = idx_guard.as_ref().ok_or_else(|| "index not available".to_string())?;
+    let qp = tantivy::query::QueryParser::for_index(index_ref, vec![fields.title, fields.body]);
     let query = qp.parse_query(q).map_err(|e| e.to_string())?;
     let top_docs = searcher.search(&query, &tantivy::collector::TopDocs::with_limit(limit)).map_err(|e| e.to_string())?;
 
@@ -134,4 +157,10 @@ pub fn search_index(state: &AppState, q: &str, limit: usize) -> Result<Vec<Searc
         results.push(SearchResult { title, path, page, section, snippet, score: score as f32 });
     }
     Ok(results)
+}
+
+// Drop cached index/reader after a rebuild
+pub fn drop_cached_index(state: &AppState) {
+    if let Ok(mut r) = state.reader.lock() { *r = None; }
+    if let Ok(mut i) = state.index.lock() { *i = None; }
 }

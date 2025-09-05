@@ -5,11 +5,15 @@ mod models;
 mod util;
 
 use std::path::PathBuf;
+use std::sync::Mutex;
+use tantivy::{Index, IndexReader};
 
 use tauri::{Manager};
 
 pub struct AppState {
     pub app_dir: PathBuf,
+    pub index: Mutex<Option<Index>>,      // lazily opened
+    pub reader: Mutex<Option<IndexReader>>, // lazily opened
 }
 
 fn resolve_app_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -25,7 +29,7 @@ fn main() {
         .setup(|app| {
             let app_dir = resolve_app_dir(&app.app_handle());
             std::fs::create_dir_all(&app_dir).ok();
-            app.manage(AppState { app_dir });
+            app.manage(AppState { app_dir, index: Mutex::new(None), reader: Mutex::new(None) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

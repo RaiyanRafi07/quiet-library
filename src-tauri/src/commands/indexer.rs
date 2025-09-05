@@ -4,10 +4,14 @@ use std::fs;
 
 #[tauri::command]
 pub async fn reindex_all(state: State<'_, AppState>) -> Result<(), String> {
-    let state_clone = AppState { app_dir: state.app_dir.clone() };
+    let state_clone = AppState { app_dir: state.app_dir.clone(), index: std::sync::Mutex::new(None), reader: std::sync::Mutex::new(None) };
     spawn_blocking(move || tantivy_index::rebuild_index(&state_clone))
         .await
         .map_err(|e| format!("join error: {:?}", e))?
+        ;
+    // After rebuild, drop cached handles so next search opens new index
+    tantivy_index::drop_cached_index(&state);
+    Ok(())
 }
 
 #[tauri::command]

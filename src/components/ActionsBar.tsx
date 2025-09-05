@@ -1,6 +1,9 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { addBookmark } from '@/lib/ipc'
-import { buttonStyle } from '@/styles'
+import Button from '@/ui/Button'
+import Toolbar from '@/ui/Toolbar'
+import BookmarkModal from '@/components/BookmarkModal'
+import type { View } from '@/types/view'
 
 export default function ActionsBar({
   onBack,
@@ -9,25 +12,38 @@ export default function ActionsBar({
   onSwitchView,
 }: {
   onBack: () => void
-  currentView: 'library' | 'pdf' | 'epub' | 'bookmarks' | 'folders'
+  currentView: View
   selection?: { path: string; page?: number; section?: string }
-  onSwitchView: (view: 'library' | 'bookmarks' | 'folders') => void
+  onSwitchView: (view: Extract<View, 'library' | 'bookmarks' | 'folders'>) => void
 }) {
-  const handleAddBookmark = async () => {
-    if (!selection) return;
-    const note = prompt('Add a note to your bookmark:');
-    await addBookmark(selection.path, selection.page, selection.section, note || undefined);
-  };
+  const [open, setOpen] = useState(false)
+  const handleAddBookmark = () => {
+    if (!selection) return
+    setOpen(true)
+  }
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #eee' }}>
-      <button onClick={onBack} disabled={currentView === 'library'} style={buttonStyle}>Back</button>
-      <button onClick={() => onSwitchView('bookmarks')} disabled={currentView === 'bookmarks'} style={buttonStyle}>Bookmarks</button>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-        {currentView === 'pdf' || currentView === 'epub' ? (
-          <button onClick={handleAddBookmark} style={buttonStyle}>Add bookmark</button>
-        ) : null}
-      </div>
-    </div>
+    <>
+      <Toolbar>
+        <Button onClick={onBack} disabled={currentView === 'library'}>Back</Button>
+        <Button onClick={() => onSwitchView('bookmarks')} disabled={currentView === 'bookmarks'}>Bookmarks</Button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {currentView === 'pdf' || currentView === 'epub' ? (
+            <Button onClick={handleAddBookmark} disabled={!selection}>Add bookmark</Button>
+          ) : null}
+        </div>
+      </Toolbar>
+      {selection && (
+        <BookmarkModal
+          open={open}
+          selection={selection}
+          onCancel={() => setOpen(false)}
+          onSave={async (note?: string) => {
+            await addBookmark(selection.path, selection.page, selection.section, note)
+            setOpen(false)
+          }}
+        />
+      )}
+    </>
   )
 }
