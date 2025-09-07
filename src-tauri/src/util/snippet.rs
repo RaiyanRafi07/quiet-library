@@ -47,3 +47,44 @@ fn next_char_boundary(s: &str, mut idx: usize) -> usize {
 fn trim_to_word_boundaries(s: &str) -> String {
     s.trim().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_snippet_contains_query() {
+        let text = "The quick brown fox jumps over the lazy dog";
+        let snip = make_snippet(text, "brown", 20);
+        assert!(snip.to_lowercase().contains("brown"));
+    }
+
+    #[test]
+    fn test_make_snippet_unicode_boundaries() {
+        let text = "Hello 👩‍💻 world — emojis!";
+        let snip = make_snippet(text, "world", 10);
+        assert!(snip.contains("world"));
+        // Ensure no panic and valid UTF-8 slices
+        assert!(snip.is_char_boundary(snip.len()));
+    }
+
+    #[test]
+    fn test_make_snippets_per_paragraph() {
+        let text = "para one has apple\n\npara two has Apple too";
+        let all = make_snippets(text, "apple", 50);
+        assert_eq!(all.len(), 2);
+        assert!(all[0].to_lowercase().contains("apple"));
+        assert!(all[1].to_lowercase().contains("apple"));
+    }
+
+    #[test]
+    fn test_char_boundary_helpers() {
+        let s = "A😊B"; // multi-byte in middle
+        let idx = 2; // inside the emoji
+        let prev = prev_char_boundary(s, idx);
+        let next = next_char_boundary(s, idx);
+        assert!(s.is_char_boundary(prev));
+        assert!(s.is_char_boundary(next));
+        assert!(prev < next);
+    }
+}

@@ -7,7 +7,7 @@ const ReaderText = lazy(() => import('./components/readers/ReaderText'))
 import ActionsBar from './components/ActionsBar'
 import BookmarksList from './components/BookmarksList'
 import FolderManager from './components/FolderManager'
-import { listWatchedFolders, reindexAll, search, clearExtractCache, type SearchResult } from './lib/ipc'
+import { listWatchedFolders, reindexAll, reindexIncremental, search, clearExtractCache, type SearchResult } from './lib/ipc'
 import { pageStyle } from './styles'
 import Button from '@/ui/Button'
 import Card from '@/ui/Card'
@@ -21,7 +21,7 @@ export default function App() {
   const debounced = useDebouncedValue(query, 250)
   const [searching, setSearching] = useState(false)
   const [folders, setFolders] = useState<string[]>([])
-  const [openTarget, setOpenTarget] = useState<{ path: string; page?: number; section?: string } | null>(null)
+  const [openTarget, setOpenTarget] = useState<{ path: string; page?: number; section?: string; startedAt?: number } | null>(null)
   const [indexing, setIndexing] = useState(false)
   const [clearing, setClearing] = useState(false)
 
@@ -47,7 +47,7 @@ export default function App() {
 
   const handleOpen = async (r: SearchResult) => {
     const ext = r.path.toLowerCase().split('.').pop()
-    setOpenTarget({ path: r.path, page: r.page, section: r.section })
+    setOpenTarget({ path: r.path, page: r.page, section: r.section, startedAt: (typeof performance !== 'undefined' ? performance.now() : Date.now()) })
     if (ext === 'pdf') {
       setView('pdf')
     } else if (ext === 'epub') {
@@ -61,7 +61,7 @@ export default function App() {
 
   const handleOpenSelection = (sel: { path: string; page?: number; section?: string }) => {
     const ext = sel.path.toLowerCase().split('.').pop()
-    setOpenTarget({ path: sel.path, page: sel.page, section: sel.section })
+    setOpenTarget({ path: sel.path, page: sel.page, section: sel.section, startedAt: (typeof performance !== 'undefined' ? performance.now() : Date.now()) })
     if (ext === 'pdf') {
       setView('pdf')
     } else if (ext === 'epub') {
@@ -109,6 +109,21 @@ export default function App() {
                 onClick={async () => {
                   setIndexing(true)
                   try {
+                    await reindexIncremental()
+                    if (debounced.trim()) {
+                      const r = await search(debounced, 50)
+                      setResults(r)
+                    }
+                  } finally {
+                    setIndexing(false)
+                  }
+                }}
+                disabled={indexing}
+              >Update index (fast)</Button>
+              <Button
+                onClick={async () => {
+                  setIndexing(true)
+                  try {
                     await reindexAll()
                     if (debounced.trim()) {
                       const r = await search(debounced, 50)
@@ -119,7 +134,7 @@ export default function App() {
                   }
                 }}
                 disabled={indexing}
-              >Reindex</Button>
+              >Optimize index</Button>
             </div>
           </div>
         )}

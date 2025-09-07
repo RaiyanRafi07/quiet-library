@@ -7,6 +7,9 @@ use std::{
 use lopdf::{content::Content, Document, Object, ObjectId};
 use serde::{Deserialize, Serialize};
 use crate::util::pdfium_loader;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 // Prefer pdfium-render for accurate Unicode extraction; fall back to lopdf if binding fails
 // or extraction encounters an error.
@@ -108,6 +111,8 @@ pub fn extract_pdf_pages_cached(
     cache_dir: &Path,
     max_pages: u32,
 ) -> Result<(String, Vec<(u32, String)>, String), String> {
+    // Opportunistic LRU pruning of cache to keep its size bounded.
+    maybe_prune_cache(cache_dir).ok();
     fs::create_dir_all(cache_dir).ok();
     let (mtime, size) = file_fingerprint(path)?;
     let key = cache_key(path, mtime, size);
@@ -136,7 +141,78 @@ pub fn extract_pdf_pages_cached(
     if (pages.len() as u32) > max_pages { pages.truncate(max_pages as usize); }
     let to_store = PdfCacheFile { title: title.clone(), pages: pages.clone(), mtime_secs: mtime, size, which: Some(which.clone()) };
     if let Ok(bytes) = serde_json::to_vec(&to_store) { let _ = fs::write(&cache_path, bytes); }
+    // Trim again after writing to enforce budget eagerly
+    maybe_prune_cache(cache_dir).ok();
     Ok((title, pages, which))
+}
+
+// ---------------- Cache maintenance (LRU-ish) -----------------
+
+const MAX_CACHE_BYTES: u64 = 300 * 1024 * 1024; // 300 MB cap
+const MAX_CACHE_AGE_SECS: u64 = 30 * 24 * 60 * 60; // 30 days
+const PRUNE_INTERVAL_SECS: u64 = 10 * 60; // run at most every 10 minutes
+
+static LAST_PRUNE_SECS: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(0));
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0)).as_secs()
+}
+
+fn maybe_prune_cache(cache_dir: &Path) -> Result<(), String> {
+    // Rate-limit to avoid heavy scans when many extracts happen in a row
+    let now = now_secs();
+    {
+        let mut last = LAST_PRUNE_SECS.lock().map_err(|_| "prune lock".to_string())?;
+        if now.saturating_sub(*last) < PRUNE_INTERVAL_SECS { return Ok(()); }
+        *last = now;
+    }
+    prune_cache(cache_dir, MAX_CACHE_BYTES, MAX_CACHE_AGE_SECS)
+}
+
+fn prune_cache(cache_dir: &Path, max_bytes: u64, max_age_secs: u64) -> Result<(), String> {
+    let mut entries: Vec<(std::path::PathBuf, u64, u64)> = Vec::new(); // (path, size, mtime)
+    if !cache_dir.exists() { return Ok(()); }
+    for e in fs::read_dir(cache_dir).map_err(|e| e.to_string())? {
+        let e = match e { Ok(x) => x, Err(_) => continue };
+        let p = e.path();
+        if !p.is_file() { continue; }
+        // only manage our pdf json cache files
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        if !name.starts_with("pdf_") || !name.ends_with(".json") { continue; }
+        if let Ok(meta) = e.metadata() {
+            let size = meta.len();
+            let mtime = meta.modified().ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs()).unwrap_or(0);
+            entries.push((p, size, mtime));
+        }
+    }
+    if entries.is_empty() { return Ok(()); }
+
+    let mut total: u64 = entries.iter().map(|x| x.1).sum();
+    let cutoff = now_secs().saturating_sub(max_age_secs);
+    // Remove too-old files first
+    for (p, size, mtime) in entries.iter() {
+        if *mtime < cutoff {
+            let _ = fs::remove_file(p);
+            total = total.saturating_sub(*size);
+        }
+    }
+    // Re-scan remaining entries (those not deleted may still be in entries; filter)
+    let mut keep: Vec<(std::path::PathBuf, u64, u64)> = Vec::new();
+    for (p, size, mtime) in entries.into_iter() {
+        if p.exists() { keep.push((p, size, mtime)); }
+    }
+    // If still over budget, remove oldest by mtime until under the cap
+    if total > max_bytes {
+        keep.sort_by_key(|x| x.2); // oldest first
+        for (p, size, _mtime) in keep {
+            if total <= max_bytes { break; }
+            let _ = fs::remove_file(&p);
+            total = total.saturating_sub(size);
+        }
+    }
+    Ok(())
 }
 
 fn extract_page_text(doc: &Document, page_id: ObjectId) -> String {
@@ -204,22 +280,64 @@ fn sanitize_text(s: &str) -> String {
 // This function cleans up whitespace within text extracted from a PDF while preserving
 // paragraph breaks, which are essential for good snippet generation.
 fn normalize_ws_preserve_newlines(s: &str) -> String {
+    // Normalize Windows newlines and stray CRs first so paragraph splitting is consistent.
+    let s = s.replace("\r\n", "\n").replace('\r', "\n");
     let mut result = String::with_capacity(s.len());
-    // Process the text paragraph by paragraph.
     for paragraph in s.split("\n\n") {
-        // For each paragraph, join its lines into a single line with normalized spaces.
-        let cleaned_paragraph = paragraph
+        // Collapse intra-line whitespace while preserving paragraph breaks.
+        let joined = paragraph
             .lines()
             .map(|line| line.trim())
             .collect::<Vec<&str>>()
             .join(" ");
-
-        if !cleaned_paragraph.trim().is_empty() {
-            if !result.is_empty() {
-                result.push_str("\n\n"); // Use double newlines to separate paragraphs.
+        // Collapse repeated spaces/tabs etc. into single spaces.
+        let mut collapsed = String::with_capacity(joined.len());
+        let mut last_space = false;
+        for ch in joined.chars() {
+            let is_space = ch.is_whitespace();
+            if is_space {
+                if !last_space { collapsed.push(' '); }
+            } else {
+                collapsed.push(ch);
             }
-            result.push_str(cleaned_paragraph.trim());
+            last_space = is_space;
+        }
+        let collapsed = collapsed.trim();
+        if !collapsed.is_empty() {
+            if !result.is_empty() { result.push_str("\n\n"); }
+            result.push_str(collapsed);
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_text_drops_zero_width_and_controls() {
+        let s = "a\u{200B}b\u{FFFD}c\x07d"; // zero-width space, replacement char, bell
+        let out = sanitize_text(s);
+        assert_eq!(out, "abcd");
+    }
+
+    #[test]
+    fn test_normalize_preserves_paragraphs() {
+        let s = "Line 1  with   spaces\nLine 2\n\nNew para\nline";
+        let out = normalize_ws_preserve_newlines(s);
+        // paragraphs separated by blank line should remain separated
+        let parts: Vec<&str> = out.split("\n\n").collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("Line 1 with spaces Line 2"));
+        assert!(parts[1].contains("New para line"));
+    }
+
+    #[test]
+    fn test_bytes_to_text_latin_fallback() {
+        // invalid UTF-8, should not panic
+        let bytes = vec![0xFF, 0xFE, b'A'];
+        let s = bytes_to_text(&bytes);
+        assert!(s.len() >= 1);
+    }
 }

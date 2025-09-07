@@ -79,3 +79,83 @@ pub fn is_supported_text(path: &Path) -> bool {
         }
     } else { false }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_normalize_ws() {
+        let s = "  hello\t\tworld\nnew\r\nline  ";
+        assert_eq!(normalize_ws(s), "hello world new line");
+    }
+
+    #[test]
+    fn test_markdown_to_text_basic() {
+        let md = "# Title\n\nHello **world**";
+        let txt = markdown_to_text(md);
+        // pulldown_cmark Text events concatenate without markup
+        assert!(txt.contains("Title"));
+        assert!(txt.contains("Hello"));
+        assert!(txt.contains("world"));
+    }
+
+    #[test]
+    fn test_is_supported_text() {
+        let cases = [
+            ("a.txt", true), ("b.md", true), ("c.markdown", true), ("d.html", true), ("e.htm", true), ("f.pdf", false)
+        ];
+        for (name, want) in cases {
+            assert_eq!(is_supported_text(Path::new(name)), want, "{}", name);
+        }
+    }
+
+    #[test]
+    fn test_extract_plain_title_and_text() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("note.txt");
+        let content = "My Title\nThis is the body.";
+        std::fs::write(&path, content).unwrap();
+        let (title, text) = extract_title_and_text(&path).unwrap();
+        assert_eq!(title, "My Title");
+        assert!(text.contains("This is the body."));
+    }
+
+    #[test]
+    fn test_extract_markdown_title() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("doc.md");
+        let content = "# Heading\n\nParagraph text";
+        std::fs::write(&path, content).unwrap();
+        let (title, text) = extract_title_and_text(&path).unwrap();
+        assert_eq!(title, "Heading");
+        assert!(text.contains("Heading"));
+        assert!(text.contains("Paragraph text"));
+    }
+
+    #[test]
+    fn test_extract_html_title() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("page.html");
+        let content = r#"<html><head><title>Test Title</title></head><body><p>Hello</p></body></html>"#;
+        std::fs::write(&path, content).unwrap();
+        let (title, text) = extract_title_and_text(&path).unwrap();
+        assert_eq!(title, "Test Title");
+        assert!(text.contains("Hello"));
+    }
+
+    #[test]
+    fn test_read_prefix_lossy_non_utf8() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("bin.txt");
+        // Invalid UTF-8 sequence
+        let bytes = b"Title\n\xFF\xFE\xFA";
+        std::fs::write(&path, bytes).unwrap();
+        let s = read_prefix(&path, 1024).unwrap();
+        // Replacement char appears
+        assert!(s.contains("Title"));
+        assert!(s.chars().any(|c| c == '\u{FFFD}'));
+    }
+}

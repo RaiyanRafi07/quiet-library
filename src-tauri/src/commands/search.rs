@@ -16,36 +16,76 @@ use crate::util::{
 
 #[tauri::command]
 pub fn search(query: String, limit: u32, state: State<AppState>) -> Result<Vec<SearchResult>, String> {
+    let t0 = std::time::Instant::now();
     let q = query.trim();
     if q.is_empty() { return Ok(vec![]); }
-    // Prefer the Tantivy index for speed if present.
-    if let Ok(results) = tantivy_index::search_index(&state, q, limit as usize) {
-        if !results.is_empty() { return Ok(results); }
+    // If an index exists, use it exclusively to avoid slow fallback scans.
+    // When no index exists yet, fall back to on-demand scanning.
+    let index_dir = state.app_dir.join("index");
+    if index_dir.exists() {
+        return tantivy_index::search_index(&state, q, limit as usize);
     }
 
     let folders = library::watched_folders(&state);
     let mut results: Vec<SearchResult> = Vec::new();
+    // Use the app cache dir consistently for extractor caches during fallback scan
+    let cache_dir = state.app_dir.join("cache");
 
     for folder in folders {
         let path = PathBuf::from(&folder);
-        scan_folder(&path, q, limit, &mut results)?;
+        scan_folder(&path, &cache_dir, q, limit, &mut results)?;
         if results.len() as u32 >= limit { break; }
     }
 
     // sort by score desc, then by path
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then(a.path.cmp(&b.path)));
     if results.len() as u32 > limit { results.truncate(limit as usize); }
+    let elapsed = t0.elapsed();
+    eprintln!("quietlibrary: search q=\"{}\" n={} elapsed={}ms", q, results.len(), elapsed.as_millis());
     Ok(results)
 }
 
-fn scan_folder(dir: &Path, q: &str, limit: u32, out: &mut Vec<SearchResult>) -> Result<(), String> {
+// Return a sorted list of pages within a document that match the query.
+// Uses the Tantivy index when available; otherwise falls back to cached PDF text.
+#[tauri::command]
+pub fn search_document_pages(path: String, query: String, limit: u32, state: State<AppState>) -> Result<Vec<u32>, String> {
+    let t0 = std::time::Instant::now();
+    let q = query.trim();
+    if q.is_empty() { return Ok(vec![]); }
+    let index_dir = state.app_dir.join("index");
+    if index_dir.exists() {
+        return tantivy_index::search_pages_for_document(&state, &path, q, limit as usize);
+    }
+    // Fallback: use extract cache to scan pages
+    let p = std::path::PathBuf::from(&path);
+    if p.extension().and_then(|s| s.to_str()).unwrap_or("").eq_ignore_ascii_case("pdf") {
+        let cache_dir = state.app_dir.join("cache");
+        if let Ok((_title, pages, _which)) = crate::util::extract_pdf::extract_pdf_pages_cached(&p, &cache_dir, limit) {
+            let lq = q.to_lowercase();
+            let mut out: Vec<u32> = Vec::new();
+            for (num, text) in pages {
+                if text.to_lowercase().contains(&lq) { out.push(num); }
+            }
+            out.sort_unstable();
+            out.dedup();
+            let elapsed = t0.elapsed();
+            eprintln!("quietlibrary: search_document_pages (fallback) file={} hits={} elapsed={}ms", path, out.len(), elapsed.as_millis());
+            return Ok(out);
+        }
+    }
+    let elapsed = t0.elapsed();
+    eprintln!("quietlibrary: search_document_pages file={} hits=0 elapsed={}ms", path, elapsed.as_millis());
+    Ok(vec![])
+}
+
+fn scan_folder(dir: &Path, cache_dir: &Path, q: &str, limit: u32, out: &mut Vec<SearchResult>) -> Result<(), String> {
     if !dir.exists() { return Ok(()); }
     let entries = match fs::read_dir(dir) { Ok(e) => e, Err(_) => return Ok(()) };
     for entry in entries {
         let entry = match entry { Ok(e) => e, Err(_) => continue };
         let path = entry.path();
         if path.is_dir() {
-            scan_folder(&path, q, limit, out)?;
+            scan_folder(&path, cache_dir, q, limit, out)?;
             if out.len() as u32 >= limit { return Ok(()); }
             continue;
         }
@@ -56,9 +96,7 @@ fn scan_folder(dir: &Path, q: &str, limit: u32, out: &mut Vec<SearchResult>) -> 
                 Err(_) => {}
             }
         } else if ext == "pdf" {
-            // Use per-user temp dir for cache to avoid passing state. Key includes mtime+size so safe enough.
-            let sys_tmp = std::env::temp_dir().join("quietlibrary-cache");
-            match extract_pdf_pages_cached(&path, &sys_tmp, 50) {
+            match extract_pdf_pages_cached(&path, cache_dir, 50) {
                 Ok((title, pages, which)) => {
                     for (page, text) in &pages {
                         push_page_results(&path, q, &title, *page, &text, Some(&which), out);

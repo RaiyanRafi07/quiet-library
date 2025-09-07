@@ -31,11 +31,17 @@ export async function removeWatchedFolder(path: string) {
 export async function reindexAll() {
   return invoke<void>('reindex_all')
 }
+export async function reindexIncremental() {
+  return invoke<void>('index_incremental')
+}
 export async function clearExtractCache() {
   return invoke<void>('clear_extract_cache')
 }
 export async function search(query: string, limit: number) {
   return invoke<SearchResult[]>('search', { query, limit })
+}
+export async function searchDocumentPages(path: string, query: string, limit: number) {
+  return invoke<number[]>('search_document_pages', { path, query, limit })
 }
 export async function resolveOpenTarget(path: string, page?: number, section?: string) {
   return invoke<{ url: string; path: string; page?: number; section?: string }>('resolve_open_target', { path, page, section })

@@ -15,8 +15,12 @@ pub async fn reindex_all(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn index_incremental() -> Result<(), String> {
-    // TODO: Use file watcher notifications to update index
+pub async fn index_incremental(state: State<'_, AppState>) -> Result<(), String> {
+    let state_clone = AppState { app_dir: state.app_dir.clone(), index: std::sync::Mutex::new(None), reader: std::sync::Mutex::new(None) };
+    tauri::async_runtime::spawn_blocking(move || tantivy_index::incremental_update(&state_clone))
+        .await
+        .map_err(|e| format!("join error: {:?}", e))??;
+    tantivy_index::drop_cached_index(&state);
     Ok(())
 }
 
